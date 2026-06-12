@@ -1,0 +1,85 @@
+.TH AISTART 1 "June 2026" "aistart 0.1.0" "User Commands"
+.SH NAME
+aistart \- launch agentic coding tools from a CLI or terminal UI
+.SH SYNOPSIS
+.B aistart
+.br
+.B aistart start
+[\fB--agent\fR \fIAGENT\fR]... [\fB--agents\fR \fILIST\fR] [\fB--env\fR \fIENV\fR] [\fB--cwd\fR \fIDIR\fR]
+.br
+.B aistart usage
+[\fB--json\fR]
+.br
+.B aistart agents
+[\fB--json\fR]
+.br
+.B aistart config
+[\fB--init\fR|\fB--show\fR]
+.SH DESCRIPTION
+.B aistart
+starts Claude Code, Codex, and configurable Antigravity sessions against a
+working directory. With no arguments it opens a Textual terminal UI.
+.SH AGENTS
+.TP
+.B claude
+Starts Claude Code using the
+.B claude
+command.
+.TP
+.B codex
+Starts Codex using
+.B codex --cd DIR
+so the target directory is explicit.
+.TP
+.B antigravity
+Starts a configurable Antigravity command. Defaults to
+.B agy
+when present on PATH.
+.SH ENVIRONMENTS
+.TP
+.B terminal-tab
+Open a new macOS Terminal.app tab. This is the default.
+.TP
+.B terminal-window
+Open a new macOS Terminal.app window.
+.TP
+.B tmux
+Create a detached tmux session, then open a Terminal window attached to it.
+Multiple selected agents share one tmux session with split panes.
+.TP
+.B screen
+Create a detached screen session, then open a Terminal window attached to it.
+.TP
+.B current
+Run exactly one selected agent in the current terminal.
+.SH OPTIONS
+.TP
+.B --agent AGENT
+Select one agent. May be repeated.
+.TP
+.B --agents LIST
+Comma-separated agent list.
+.TP
+.B --env ENV
+Launch environment: terminal-tab, terminal-window, tmux, screen, or current.
+.TP
+.B -C, --cwd DIR
+Working directory. Defaults to the current directory.
+.TP
+.B --json
+Emit JSON for status commands.
+.SH FILES
+.TP
+.I ~/.config/aistart/config.json
+User configuration.
+.TP
+.I ~/.claude/stats-cache.json
+Best-effort Claude local monthly usage source. Claude 5h and weekly
+rate-limit windows are read from Claude Code policy-limit cache/status JSON
+when available.
+.TP
+.I ~/.codex/state_5.sqlite
+Best-effort Codex local token/session usage source. Live Codex 5h and weekly
+rate-limit windows are queried from codex app-server.
+.SH EXIT STATUS
+Returns 0 on success, 1 for launch failures, and 2 for command-line usage errors.

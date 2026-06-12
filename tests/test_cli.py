@@ -30,3 +30,25 @@ def test_config_show_prints_default(monkeypatch, tmp_path, capsys):
 
     data = json.loads(capsys.readouterr().out)
     assert data["default_env"] == "terminal-tab"
+
+
+def test_theme_option_passes_initial_tui_theme(monkeypatch):
+    seen = {}
+
+    def fake_run_tui(theme="dark"):
+        seen["theme"] = theme
+        return 0
+
+    monkeypatch.setattr("aistart.tui.run_tui", fake_run_tui)
+
+    assert cli.main(["--theme", "light"]) == 0
+    assert seen["theme"] == "light"
+
+
+def test_theme_option_rejects_unknown_theme():
+    try:
+        cli.main(["--theme", "blue"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected SystemExit")

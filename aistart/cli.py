@@ -10,6 +10,7 @@ from rich.table import Table
 from .agents import AGENTS, AgentRuntime, resolve_agents
 from .config import config_as_json, init_config, load_config
 from .launchers import LAUNCH_ENVS, launch_agents
+from .tui import TUI_THEMES
 from .usage import collect_all_usage
 
 
@@ -23,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Launch agentic coding frameworks against a directory.",
     )
     parser.add_argument("--version", action="version", version="aistart 0.1.0")
+    parser.add_argument(
+        "--theme",
+        choices=TUI_THEMES,
+        default="dark",
+        help="initial TUI theme when no subcommand is provided",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     start = subparsers.add_parser("start", help="start one or more agents")
@@ -54,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         from .tui import run_tui
 
-        return run_tui()
+        return run_tui(args.theme)
 
     config = load_config()
     runtimes = resolve_agents(config)

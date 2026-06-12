@@ -3,6 +3,7 @@
 aistart \- launch agentic coding tools from a CLI or terminal UI
 .SH SYNOPSIS
 .B aistart
+[\fB--theme\fR \fITHEME\fR]
 .br
 .B aistart start
 [\fB--agent\fR \fIAGENT\fR]... [\fB--agents\fR \fILIST\fR] [\fB--env\fR \fIENV\fR] [\fB--cwd\fR \fIDIR\fR]
@@ -53,6 +54,9 @@ Create a detached screen session, then open a Terminal window attached to it.
 .B current
 Run exactly one selected agent in the current terminal.
 .SH OPTIONS
+.TP
+.B --theme THEME
+Initial TUI theme when no subcommand is provided: dark, light, or amber.
 .TP
 .B --agent AGENT
 Select one agent. May be repeated.

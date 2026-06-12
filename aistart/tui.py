@@ -8,18 +8,146 @@ from .launchers import LAUNCH_ENVS, launch_agents
 from .usage import collect_all_usage
 
 
-def build_tui_app():
+TUI_THEMES = ("dark", "light", "amber")
+
+
+def build_tui_app(initial_theme: str = "dark"):
     try:
         from textual.app import App, ComposeResult
         from textual.containers import Horizontal, Vertical
+        from textual.screen import Screen
         from textual.widgets import Button, Checkbox, Footer, Header, Select, Static
     except ImportError as exc:
         raise RuntimeError(f"Textual is required for the TUI: {exc}") from exc
+
+    class ThemeScreen(Screen[str | None]):
+        CSS = """
+        ThemeScreen {
+            align: center middle;
+            padding: 1 2;
+        }
+        ThemeScreen.theme-light {
+            background: #f7f8fa;
+            color: #1f2328;
+        }
+        ThemeScreen.theme-light #theme-page {
+            background: #ffffff;
+            color: #1f2328;
+            border: solid #0969da;
+        }
+        ThemeScreen.theme-light Button {
+            background: #e7f0fb;
+            color: #1f2328;
+        }
+        #theme-page {
+            width: 40;
+            height: auto;
+            border: solid $primary;
+            padding: 1 2;
+        }
+        #theme-page Button {
+            width: 100%;
+            margin-top: 1;
+        }
+        """
+
+        BINDINGS = [("escape", "back", "Back"), ("q", "back", "Back")]
+
+        def __init__(self, theme: str) -> None:
+            super().__init__()
+            self.initial_theme = theme
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="theme-page"):
+                yield Static("Theme")
+                for theme in TUI_THEMES:
+                    yield Button(theme.title(), id=f"theme-{theme}")
+                yield Button("Back", id="theme-back")
+
+        def on_mount(self) -> None:
+            self.add_class(f"theme-{self.initial_theme}")
+
+        def action_back(self) -> None:
+            self.dismiss(None)
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "theme-back":
+                self.dismiss(None)
+                return
+            if event.button.id and event.button.id.startswith("theme-"):
+                self.dismiss(event.button.id.removeprefix("theme-"))
 
     class AIStartApp(App):
         CSS = """
         Screen {
             padding: 1 2;
+        }
+        Screen.theme-dark {
+            background: #101418;
+            color: #e6edf3;
+        }
+        Screen.theme-dark #agents {
+            border: solid #58a6ff;
+        }
+        Screen.theme-dark #messages {
+            border: solid #8b949e;
+        }
+        Screen.theme-light {
+            background: #f7f8fa;
+            color: #1f2328;
+        }
+        Screen.theme-light Header,
+        Screen.theme-light Footer {
+            background: #dbeafe;
+            color: #1f2328;
+        }
+        Screen.theme-light Footer * {
+            background: #dbeafe;
+            color: #1f2328;
+        }
+        Screen.theme-light #agents {
+            background: #ffffff;
+            color: #1f2328;
+            border: solid #0969da;
+        }
+        Screen.theme-light #messages {
+            background: #ffffff;
+            color: #1f2328;
+            border: solid #6e7781;
+        }
+        Screen.theme-light Static,
+        Screen.theme-light Checkbox,
+        Screen.theme-light Select {
+            background: #f7f8fa;
+            color: #1f2328;
+        }
+        Screen.theme-light #agents Checkbox {
+            background: #ffffff;
+            color: #1f2328;
+        }
+        Screen.theme-light Select {
+            background: #ffffff;
+            color: #1f2328;
+            border: solid #0969da;
+        }
+        Screen.theme-light Select * {
+            background: #ffffff;
+            color: #1f2328;
+        }
+        Screen.theme-light Select:focus,
+        Screen.theme-light Select:focus * {
+            background: #e7f0fb;
+            color: #1f2328;
+        }
+        Screen.theme-amber {
+            background: #201400;
+            color: #ffe8b3;
+        }
+        Screen.theme-amber #agents {
+            border: solid #ffb000;
+        }
+        Screen.theme-amber #messages {
+            border: solid #c98600;
         }
         #agents {
             width: 100%;
@@ -27,11 +155,21 @@ def build_tui_app():
             border: solid $primary;
             padding: 1;
         }
+        #main-spacer {
+            height: 1fr;
+        }
+        #status-row {
+            width: 100%;
+            height: 8;
+            align: right middle;
+        }
         .agent-row {
             height: auto;
             margin-bottom: 1;
         }
         #messages {
+            width: 50%;
+            min-width: 48;
             height: 8;
             border: solid $secondary;
             padding: 1;
@@ -42,6 +180,7 @@ def build_tui_app():
             ("q", "quit", "Quit"),
             ("r", "refresh", "Refresh"),
             ("s", "start_selected", "Start"),
+            ("t", "select_theme", "Theme"),
             ("x", "toggle_focused_checkbox", "Toggle"),
             ("down", "focus_next", "Next"),
             ("up", "focus_previous", "Previous"),
@@ -55,6 +194,7 @@ def build_tui_app():
             self.checkboxes: dict[str, Checkbox] = {}
             self.env_select: Select | None = None
             self.messages: Static | None = None
+            self.selected_theme = initial_theme if initial_theme in TUI_THEMES else "dark"
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -80,11 +220,14 @@ def build_tui_app():
                 id="env",
             )
             yield self.env_select
-            with Horizontal():
-                yield Button("Start", id="start", variant="success")
-            self.messages = Static("", id="messages")
-            yield self.messages
+            yield Static("", id="main-spacer")
+            with Horizontal(id="status-row"):
+                self.messages = Static("", id="messages")
+                yield self.messages
             yield Footer()
+
+        def on_mount(self) -> None:
+            self._apply_theme(self.selected_theme)
 
         def action_refresh(self) -> None:
             self.runtimes = resolve_agents(self.config)
@@ -99,9 +242,12 @@ def build_tui_app():
             if isinstance(focused, Checkbox):
                 focused.value = not focused.value
 
-        def on_button_pressed(self, event: Button.Pressed) -> None:
-            if event.button.id == "start":
-                self._start_selected()
+        def action_select_theme(self) -> None:
+            self.push_screen(ThemeScreen(self.selected_theme), self._theme_selected)
+
+        def _theme_selected(self, theme: str | None) -> None:
+            if theme:
+                self._apply_theme(theme)
 
         def _start_selected(self) -> None:
             selected = [
@@ -126,12 +272,20 @@ def build_tui_app():
             if self.messages:
                 self.messages.update(text)
 
+        def _apply_theme(self, theme: str) -> None:
+            if theme not in TUI_THEMES:
+                theme = "dark"
+            for known_theme in TUI_THEMES:
+                self.screen.remove_class(f"theme-{known_theme}")
+            self.screen.add_class(f"theme-{theme}")
+            self.selected_theme = theme
+
     return AIStartApp
 
 
-def run_tui() -> int:
+def run_tui(theme: str = "dark") -> int:
     try:
-        app_class = build_tui_app()
+        app_class = build_tui_app(theme)
     except RuntimeError as exc:
         print(exc)
         return 1

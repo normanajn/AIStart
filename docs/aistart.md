@@ -12,10 +12,12 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[test]"
 aistart
+aistart --theme amber
 ```
 
 Running `aistart` without arguments opens the TUI. Select one or more agents,
-choose a launch environment, and press Start.
+choose a launch environment, press `t` to choose `dark`, `light`, or `amber`
+from the theme page, and press `s` to start.
 
 ## Command Line Examples
 
@@ -49,9 +51,9 @@ aistart usage --json
 opens a new macOS Terminal window. `tmux` and `screen` create detached sessions,
 then open a new Terminal window attached to the session. When multiple agents
 are selected with `tmux`, AIStart creates one tmux session and starts each agent
-in its own split pane using a tiled layout. Both tmux and screen still print the
-manual attach command. `current` replaces the current process and only works
-with one selected agent.
+in its own top-row pane, then adds a full-width `Testing` shell pane below them.
+Both tmux and screen still print the manual attach command. `current` replaces
+the current process and only works with one selected agent.
 
 ## Configuration
 

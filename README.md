@@ -23,7 +23,11 @@ Open the TUI:
 
 ```bash
 aistart
+aistart --theme light
 ```
+
+In the TUI, press `s` to start selected agents and `t` to open the theme page
+with `dark`, `light`, and `amber` themes.
 
 Start Claude and Codex in new macOS Terminal tabs:
 

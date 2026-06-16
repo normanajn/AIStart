@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -65,9 +66,9 @@ def launch_agent(
     argv = agent.argv(cwd)
     script = shell_script(argv, cwd)
     if env == "terminal-tab":
-        return _launch_terminal(agent.definition.name, script, config, new_tab=True)
+        return _launch_terminal(agent.definition.name, script, config, new_tab=True, argv=argv, cwd=cwd)
     if env == "terminal-window":
-        return _launch_terminal(agent.definition.name, script, config, new_tab=False)
+        return _launch_terminal(agent.definition.name, script, config, new_tab=False, argv=argv, cwd=cwd)
     if env == "tmux":
         return _launch_tmux(agent.definition.name, script, cwd, config)
     if env == "screen":
@@ -77,15 +78,71 @@ def launch_agent(
     return LaunchResult(agent.definition.name, False, f"unknown environment: {env}")
 
 
-def _launch_terminal(agent: str, script: str, config: AppConfig, new_tab: bool) -> LaunchResult:
-    if platform.system() != "Darwin":
-        return LaunchResult(agent, False, "terminal tabs/windows are only supported on macOS")
+def _launch_terminal(
+    agent: str,
+    script: str,
+    config: AppConfig,
+    new_tab: bool,
+    argv: list[str] | None = None,
+    cwd: Path | None = None,
+) -> LaunchResult:
+    system = platform.system()
+    if system == "Windows":
+        return _launch_windows_terminal(agent, argv or [], cwd, new_tab)
+    if system != "Darwin":
+        return LaunchResult(agent, False, "terminal tabs/windows are only supported on macOS and Windows")
     if config.terminal_app != "Terminal":
         return LaunchResult(agent, False, f"unsupported terminal_app: {config.terminal_app}")
     ok, message = _open_terminal_script(script, config, new_tab=new_tab)
     if not ok:
         return LaunchResult(agent, False, message)
     return LaunchResult(agent, True, "started in Terminal")
+
+
+def _launch_windows_terminal(
+    agent: str,
+    argv: list[str],
+    cwd: Path | None,
+    new_tab: bool,
+) -> LaunchResult:
+    if not argv:
+        return LaunchResult(agent, False, "no command to launch")
+    cwd_str = str(cwd) if cwd is not None else "."
+
+    wt = shutil.which("wt")
+    if wt:
+        # `-w 0` targets the most recent window (creating one if needed) for a new
+        # tab; `-w new` forces a fresh window. The command runs under `cmd /k` so
+        # PATH/PATHEXT resolution finds `.cmd`/`.bat` shims (e.g. npm-installed
+        # `claude.cmd`) and the window stays open if the agent exits.
+        window = ["-w", "0"] if new_tab else ["-w", "new"]
+        command = [wt, *window, "new-tab", "-d", cwd_str, "cmd", "/k", *argv]
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            return LaunchResult(agent, False, result.stderr.strip() or "failed to open Windows Terminal")
+        where = "tab" if new_tab else "window"
+        return LaunchResult(agent, True, f"started in Windows Terminal {where}")
+
+    return _launch_windows_console(agent, argv, cwd_str)
+
+
+def _launch_windows_console(agent: str, argv: list[str], cwd_str: str) -> LaunchResult:
+    # Fallback for systems without Windows Terminal: open a detached PowerShell
+    # window via `start`. There is no tab concept here, so this is always a new
+    # window. Quote everything for PowerShell to keep paths with spaces intact.
+    script = "Set-Location -LiteralPath {}; & {}".format(
+        _powershell_quote(cwd_str),
+        " ".join(_powershell_quote(part) for part in argv),
+    )
+    command = ["cmd", "/c", "start", "", "powershell", "-NoExit", "-Command", script]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return LaunchResult(agent, False, result.stderr.strip() or "failed to open console window")
+    return LaunchResult(agent, True, "started in new console window")
+
+
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _launch_tmux(agent: str, script: str, cwd: Path, config: AppConfig) -> LaunchResult:

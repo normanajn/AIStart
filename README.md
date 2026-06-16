@@ -29,7 +29,7 @@ aistart --theme light
 In the TUI, press `s` to start selected agents and `t` to open the theme page
 with `dark`, `light`, and `amber` themes.
 
-Start Claude and Codex in new macOS Terminal tabs:
+Start Claude and Codex in new terminal tabs (macOS Terminal or Windows Terminal):
 
 ```bash
 aistart start --agents claude,codex --env terminal-tab
@@ -63,8 +63,8 @@ aistart config --show
 
 ## Launch Environments
 
-- `terminal-tab`: open a new tab in macOS Terminal.app. This is the default.
-- `terminal-window`: open a new macOS Terminal.app window.
+- `terminal-tab`: open a new terminal tab. This is the default. On macOS this uses Terminal.app; on Windows 11 it uses Windows Terminal (`wt`), adding a tab to the most recent window.
+- `terminal-window`: open a new terminal window. On macOS this uses Terminal.app; on Windows 11 it uses Windows Terminal (`wt`), or falls back to a PowerShell console window if `wt` is unavailable.
 - `tmux`: create a detached tmux session, then open a Terminal window attached to it. Multiple selected agents share one tmux session with split panes.
 - `screen`: create a detached screen session, then open a Terminal window attached to it.
 - `current`: replace the current process with one selected agent.

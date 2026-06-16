@@ -78,9 +78,12 @@ Emit JSON for status commands.
 User configuration.
 .TP
 .I ~/.claude/stats-cache.json
-Best-effort Claude local monthly usage source. Claude 5h and weekly
-rate-limit windows are read from Claude Code policy-limit cache/status JSON
-when available.
+Best-effort Claude local monthly usage source. The live Claude 5h and weekly
+rate-limit windows are fetched from the Anthropic API
+.B anthropic-ratelimit-unified-*
+response headers using the Claude Code OAuth token (macOS keychain or
+.IR ~/.claude/.credentials.json ),
+falling back to cached policy-limit JSON when no token is available.
 .TP
 .I ~/.codex/state_5.sqlite
 Best-effort Codex local token/session usage source. Live Codex 5h and weekly

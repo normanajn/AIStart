@@ -11,7 +11,7 @@ from .agents import AGENTS, AgentRuntime, resolve_agents
 from .config import config_as_json, init_config, load_config
 from .launchers import LAUNCH_ENVS, launch_agents
 from .tui import TUI_THEMES
-from .usage import collect_all_usage
+from .usage import collect_all_usage, format_usage_bar
 
 
 console = Console()
@@ -129,9 +129,9 @@ def _cmd_usage(args: argparse.Namespace, config, runtimes: dict[str, AgentRuntim
     for name, stats in usage.items():
         table.add_row(
             name,
-            stats.limit_5h,
+            format_usage_bar(stats.percent_5h, stats.limit_5h),
             stats.reset_5h,
-            stats.limit_weekly,
+            format_usage_bar(stats.percent_weekly, stats.limit_weekly),
             stats.reset_weekly,
             stats.session_usage,
             stats.error or "",

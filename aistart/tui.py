@@ -5,7 +5,7 @@ from pathlib import Path
 from .agents import resolve_agents
 from .config import load_config
 from .launchers import LAUNCH_ENVS, launch_agents
-from .usage import collect_all_usage
+from .usage import collect_all_usage, format_usage_bar
 
 
 TUI_THEMES = ("dark", "light", "amber")
@@ -207,8 +207,10 @@ def build_tui_app(initial_theme: str = "dark"):
                         status = "disabled"
                     label = (
                         f"{runtime.definition.label} ({status}) | "
-                        f"5h {stats.limit_5h} reset {stats.reset_5h} | "
-                        f"weekly {stats.limit_weekly} reset {stats.reset_weekly} | "
+                        f"5h {format_usage_bar(stats.percent_5h, stats.limit_5h)} "
+                        f"reset {stats.reset_5h} | "
+                        f"weekly {format_usage_bar(stats.percent_weekly, stats.limit_weekly)} "
+                        f"reset {stats.reset_weekly} | "
                         f"{stats.session_usage}"
                     )
                     checkbox = Checkbox(label, value=False, id=f"agent-{name}")

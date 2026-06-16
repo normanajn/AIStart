@@ -75,9 +75,12 @@ The `current` environment only supports one selected agent.
 
 Usage reporting is best-effort local telemetry plus live agent rate limits:
 
-- Claude reads `~/.claude/stats-cache.json` for monthly totals and reads Claude
-  Code policy-limit cache/status JSON when available for the live 5h and weekly
-  windows shown by Claude Code `/status`.
+- Claude reads `~/.claude/stats-cache.json` for monthly totals and fetches the
+  live 5h and weekly windows shown by Claude Code `/status` from the Anthropic
+  API `anthropic-ratelimit-unified-*` response headers, authenticating with the
+  Claude Code OAuth token (macOS keychain or `~/.claude/.credentials.json`) via
+  a minimal probe request. Cached policy-limit JSON is used as a fallback when
+  no token is available.
 - Codex reads `~/.codex/state_5.sqlite` for local token/session totals and queries
   `codex app-server --stdio` for the live 5h and weekly rate-limit windows shown
   by Codex `/status`.

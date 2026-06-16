@@ -84,8 +84,12 @@ different name or needs arguments, configure it:
 ## Usage Data
 
 Usage values are local and best-effort. Claude monthly totals are read from
-`~/.claude/stats-cache.json`; Claude 5h and weekly windows are read from Claude
-Code policy-limit cache/status JSON when available. Codex token/session totals
+`~/.claude/stats-cache.json`; the live Claude 5h and weekly windows are fetched
+from the Anthropic API `anthropic-ratelimit-unified-*` response headers (the
+same data Claude Code `/status` shows) using the Claude Code OAuth token from
+the macOS keychain or `~/.claude/.credentials.json`. This issues a minimal
+`max_tokens` probe request. When no token is available, any cached policy-limit
+JSON is used as a fallback. Codex token/session totals
 are read from `~/.codex/state_5.sqlite`. Codex 5h and weekly limits are fetched
 through `codex app-server --stdio` using the same `account/rateLimits/read` data
 that backs Codex `/status`. Fields that are not exposed by a local agent are

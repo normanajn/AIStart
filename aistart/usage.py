@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import platform
 import select
 import sqlite3
+import ssl
 import subprocess
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -14,6 +18,15 @@ from .config import AppConfig
 
 
 UNKNOWN = "unknown"
+
+# Live Claude Code rate limits are not cached to disk; they are only returned as
+# `anthropic-ratelimit-unified-*` response headers (the same data Claude Code
+# `/status` shows). We read them with a minimal probe request using the Claude
+# Code OAuth token.
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_PROBE_MODEL = "claude-haiku-4-5-20251001"
+CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
+CLAUDE_RATE_LIMIT_HEADER_PREFIX = "anthropic-ratelimit-unified"
 
 
 @dataclass
@@ -27,6 +40,8 @@ class UsageStats:
     reset_5h: str = UNKNOWN
     limit_weekly: str = UNKNOWN
     reset_weekly: str = UNKNOWN
+    percent_5h: float | None = None
+    percent_weekly: float | None = None
     details: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
@@ -41,6 +56,8 @@ class UsageStats:
             "reset_5h": self.reset_5h,
             "limit_weekly": self.limit_weekly,
             "reset_weekly": self.reset_weekly,
+            "percent_5h": self.percent_5h,
+            "percent_weekly": self.percent_weekly,
             "details": self.details,
             "error": self.error,
         }
@@ -112,6 +129,7 @@ def claude_usage(
     path: Path | None = None,
     today: date | None = None,
     include_rate_limits: bool = True,
+    claude_home: Path | None = None,
 ) -> UsageStats:
     stats_path = path or Path.home() / ".claude" / "stats-cache.json"
     current = today or date.today()
@@ -159,17 +177,21 @@ def claude_usage(
         "total_messages": data.get("totalMessages"),
         "last_computed_date": data.get("lastComputedDate"),
     }
-    rate_limits = claude_rate_limits() if include_rate_limits else None
+    rate_limits = claude_rate_limits(claude_home) if include_rate_limits else None
     if rate_limits:
         details["rate_limits"] = rate_limits
 
+    window_5h = rate_limits.get("5h") if rate_limits else None
+    window_weekly = rate_limits.get("weekly") if rate_limits else None
     return UsageStats(
         "claude",
         session_usage=summary,
-        limit_5h=_format_window_usage(rate_limits.get("5h") if rate_limits else None),
-        reset_5h=_format_window_reset(rate_limits.get("5h") if rate_limits else None),
-        limit_weekly=_format_window_usage(rate_limits.get("weekly") if rate_limits else None),
-        reset_weekly=_format_window_reset(rate_limits.get("weekly") if rate_limits else None),
+        limit_5h=_format_window_usage(window_5h),
+        reset_5h=_format_window_reset(window_5h),
+        limit_weekly=_format_window_usage(window_weekly),
+        reset_weekly=_format_window_reset(window_weekly),
+        percent_5h=_window_percent(window_5h),
+        percent_weekly=_window_percent(window_weekly),
         details=details,
     )
 
@@ -223,13 +245,17 @@ def codex_usage(
     if rate_limits:
         details["rate_limits"] = rate_limits
 
+    window_5h = rate_limits.get("5h") if rate_limits else None
+    window_weekly = rate_limits.get("weekly") if rate_limits else None
     return UsageStats(
         "codex",
         session_usage=f"{int(month_tokens):,} tokens, {int(month_count):,} sessions this month",
-        limit_5h=_format_window_usage(rate_limits.get("5h") if rate_limits else None),
-        reset_5h=_format_window_reset(rate_limits.get("5h") if rate_limits else None),
-        limit_weekly=_format_window_usage(rate_limits.get("weekly") if rate_limits else None),
-        reset_weekly=_format_window_reset(rate_limits.get("weekly") if rate_limits else None),
+        limit_5h=_format_window_usage(window_5h),
+        reset_5h=_format_window_reset(window_5h),
+        limit_weekly=_format_window_usage(window_weekly),
+        reset_weekly=_format_window_reset(window_weekly),
+        percent_5h=_window_percent(window_5h),
+        percent_weekly=_window_percent(window_weekly),
         details=details,
     )
 
@@ -241,8 +267,154 @@ def codex_rate_limits(timeout: float = 5.0) -> dict[str, dict[str, Any]] | None:
     return _extract_codex_rate_limit_windows(response)
 
 
-def claude_rate_limits(claude_home: Path | None = None) -> dict[str, dict[str, Any]] | None:
+def claude_rate_limits(
+    claude_home: Path | None = None,
+    timeout: float = 8.0,
+) -> dict[str, dict[str, Any]] | None:
+    """Return the live 5h and weekly rate-limit windows for Claude Code.
+
+    The current usage and reset times are only exposed as response headers from
+    the Anthropic API, so we issue a minimal probe request authenticated with
+    the Claude Code OAuth token. When no live data is available (no token,
+    offline, or an explicit sandboxed ``claude_home``) we fall back to scanning
+    any cached policy-limit JSON.
+    """
     home = claude_home or Path.home() / ".claude"
+    # Only read the system keychain for the real default home; an explicit
+    # claude_home is treated as a sandbox and limited to files within it.
+    token = _claude_oauth_token(home, allow_keychain=claude_home is None)
+    if token:
+        headers = _read_claude_rate_limit_headers(token, timeout=timeout)
+        if headers:
+            windows = _windows_from_claude_headers(headers)
+            if windows:
+                return windows
+    return _claude_rate_limits_from_files(home)
+
+
+def _claude_oauth_token(claude_home: Path, allow_keychain: bool) -> str | None:
+    if allow_keychain and platform.system() == "Darwin":
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except OSError:
+            result = None
+        if result is not None and result.returncode == 0:
+            token = _token_from_credentials_json(result.stdout)
+            if token:
+                return token
+    return _token_from_credentials_json(_read_text(claude_home / ".credentials.json"))
+
+
+def _token_from_credentials_json(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    oauth = data.get("claudeAiOauth")
+    if not isinstance(oauth, dict):
+        return None
+    expires_at = oauth.get("expiresAt")
+    if isinstance(expires_at, (int, float)) and expires_at / 1000 < datetime.now().timestamp():
+        return None
+    token = oauth.get("accessToken")
+    return token if isinstance(token, str) and token else None
+
+
+def _read_claude_rate_limit_headers(token: str, timeout: float) -> dict[str, str] | None:
+    body = json.dumps(
+        {
+            "model": CLAUDE_PROBE_MODEL,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "."}],
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        CLAUDE_API_URL,
+        data=body,
+        headers={
+            "authorization": f"Bearer {token}",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "oauth-2025-04-20",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=_ssl_context()) as response:
+            return _claude_rate_limit_headers(response.headers)
+    except urllib.error.HTTPError as exc:
+        # Rate-limit headers are still present on 429/4xx responses.
+        return _claude_rate_limit_headers(exc.headers) or None
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    # Some Python builds (notably the python.org macOS framework) ship without a
+    # populated trust store; fall back to certifi's CA bundle when present.
+    if context.cert_store_stats().get("x509_ca", 0) == 0:
+        try:
+            import certifi
+
+            context.load_verify_locations(certifi.where())
+        except Exception:
+            pass
+    return context
+
+
+def _claude_rate_limit_headers(headers: Any) -> dict[str, str]:
+    if headers is None:
+        return {}
+    return {
+        str(key).lower(): value
+        for key, value in headers.items()
+        if str(key).lower().startswith(CLAUDE_RATE_LIMIT_HEADER_PREFIX)
+    }
+
+
+def _windows_from_claude_headers(headers: dict[str, str]) -> dict[str, dict[str, Any]]:
+    raw = {
+        "5h": _claude_header_window(headers, "5h"),
+        "weekly": _claude_header_window(headers, "7d"),
+    }
+    windows = _extract_generic_rate_limit_windows(raw)
+    if not windows:
+        return {}
+    status = headers.get(f"{CLAUDE_RATE_LIMIT_HEADER_PREFIX}-status")
+    if status is not None:
+        windows["source"] = {"status": status}
+    return windows
+
+
+def _claude_header_window(headers: dict[str, str], window: str) -> dict[str, Any] | None:
+    utilization = headers.get(f"{CLAUDE_RATE_LIMIT_HEADER_PREFIX}-{window}-utilization")
+    resets_at = headers.get(f"{CLAUDE_RATE_LIMIT_HEADER_PREFIX}-{window}-reset")
+    if utilization is None and resets_at is None:
+        return None
+    parsed: dict[str, Any] = {}
+    if utilization is not None:
+        try:
+            parsed["utilization"] = float(utilization)
+        except ValueError:
+            pass
+    if resets_at is not None:
+        try:
+            parsed["resets_at"] = int(resets_at)
+        except ValueError:
+            pass
+    return parsed or None
+
+
+def _claude_rate_limits_from_files(home: Path) -> dict[str, dict[str, Any]] | None:
     candidates = [
         home / "policy-limits.json",
         home / "policy_limits.json",
@@ -460,6 +632,8 @@ def _apply_rate_limit_fields(
     stats.reset_5h = _format_window_reset(rate_limits.get("5h"))
     stats.limit_weekly = _format_window_usage(rate_limits.get("weekly"))
     stats.reset_weekly = _format_window_reset(rate_limits.get("weekly"))
+    stats.percent_5h = _window_percent(rate_limits.get("5h"))
+    stats.percent_weekly = _window_percent(rate_limits.get("weekly"))
     stats.details.setdefault("rate_limits", rate_limits)
 
 
@@ -467,6 +641,13 @@ def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -480,6 +661,45 @@ def _format_window_usage(window: dict[str, Any] | None) -> str:
     if window.get("remaining_percent") is not None:
         return f"{int(window['remaining_percent'])}% remaining"
     return UNKNOWN
+
+
+def _window_percent(window: dict[str, Any] | None) -> float | None:
+    """Return the used percentage (0-100) for a window, if it can be derived."""
+    if not window:
+        return None
+    if window.get("used_percent") is not None:
+        try:
+            return float(window["used_percent"])
+        except (TypeError, ValueError):
+            return None
+    used, limit = window.get("used"), window.get("limit")
+    if used is not None and limit is not None:
+        try:
+            limit_value = float(limit)
+            if limit_value > 0:
+                return float(used) / limit_value * 100
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+    if window.get("remaining_percent") is not None:
+        try:
+            return 100.0 - float(window["remaining_percent"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def format_usage_bar(percent: float | None, fallback: str = UNKNOWN, width: int = 10) -> str:
+    """Render a used-percentage as a text bar, e.g. ``████░░░░░░ 40%``.
+
+    Falls back to ``fallback`` when no percentage is available so callers can
+    still show non-percentage usage strings (e.g. ``used / limit``).
+    """
+    if percent is None:
+        return fallback
+    clamped = max(0.0, min(100.0, float(percent)))
+    filled = int(round(clamped / 100 * width))
+    bar = "█" * filled + "░" * (width - filled)
+    return f"{bar} {int(round(clamped))}%"
 
 
 def _format_window_reset(window: dict[str, Any] | None) -> str:

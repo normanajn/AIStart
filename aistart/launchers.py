@@ -330,7 +330,26 @@ end tell
     return True, "opened Terminal attachment"
 
 
+def _reset_current_terminal() -> None:
+    # The TUI runs on the alternate screen in raw mode; the agent we are about to
+    # exec is itself a TUI. Without a reset the agent inherits leftover modes and
+    # the alternate-screen buffer, producing garbled output. Prefer the terminal's
+    # own `reset`/`cls`, then fall back to emitting the standard escape sequences:
+    # full reset (ESC c), exit alternate screen (ESC [ ? 1049 l), and clear/home
+    # (ESC [ 2 J / ESC [ H).
+    command = ["cls"] if platform.system() == "Windows" else ["reset"]
+    if shutil.which(command[0]):
+        result = subprocess.run(command, check=False)
+        if result.returncode == 0:
+            return
+    try:
+        os.write(1, b"\x1bc\x1b[?1049l\x1b[2J\x1b[H")
+    except OSError:
+        pass
+
+
 def _launch_current(agent: str, argv: list[str], cwd: Path) -> LaunchResult:
+    _reset_current_terminal()
     try:
         os.chdir(cwd)
         os.execvp(argv[0], argv)

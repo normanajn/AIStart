@@ -33,6 +33,30 @@ def test_current_rejects_multiple_agents(tmp_path):
     assert "exactly one" in results[0].message
 
 
+def test_current_resets_terminal_before_exec(monkeypatch, tmp_path):
+    events = []
+
+    monkeypatch.setattr("aistart.launchers._reset_current_terminal", lambda: events.append("reset"))
+    monkeypatch.setattr("aistart.launchers.os.chdir", lambda cwd: events.append(("chdir", cwd)))
+
+    def fake_execvp(file, argv):
+        events.append(("exec", file, argv))
+        raise OSError("no exec in tests")
+
+    monkeypatch.setattr("aistart.launchers.os.execvp", fake_execvp)
+
+    results = launch_agents(
+        [runtime("claude")],
+        "current",
+        tmp_path,
+        load_config(tmp_path / "missing.json"),
+    )
+
+    assert results[0].ok is False
+    assert events[0] == "reset"
+    assert events[-1][0] == "exec"
+
+
 def test_tmux_starts_session_then_opens_terminal_attach(monkeypatch, tmp_path):
     calls = []
 

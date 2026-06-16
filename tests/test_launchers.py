@@ -130,6 +130,118 @@ def test_tmux_multi_agent_uses_split_panes(monkeypatch, tmp_path):
     assert "tmux attach -t aistart-agents-1" in calls[6][2]
 
 
+def test_terminal_tab_uses_windows_terminal(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr("aistart.launchers.platform.system", lambda: "Windows")
+    monkeypatch.setattr("aistart.launchers.shutil.which", lambda name: "C:\\wt.exe")
+    monkeypatch.setattr("aistart.launchers.subprocess.run", fake_run)
+
+    results = launch_agents(
+        [runtime("claude")],
+        "terminal-tab",
+        tmp_path,
+        load_config(tmp_path / "missing.json"),
+    )
+
+    assert results[0].ok is True
+    assert "tab" in results[0].message
+    assert calls[0] == [
+        "C:\\wt.exe",
+        "-w",
+        "0",
+        "new-tab",
+        "-d",
+        str(tmp_path),
+        "cmd",
+        "/k",
+        "claude",
+    ]
+
+
+def test_terminal_window_uses_new_windows_terminal_window(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr("aistart.launchers.platform.system", lambda: "Windows")
+    monkeypatch.setattr("aistart.launchers.shutil.which", lambda name: "C:\\wt.exe")
+    monkeypatch.setattr("aistart.launchers.subprocess.run", fake_run)
+
+    results = launch_agents(
+        [runtime("claude")],
+        "terminal-window",
+        tmp_path,
+        load_config(tmp_path / "missing.json"),
+    )
+
+    assert results[0].ok is True
+    assert "window" in results[0].message
+    assert calls[0][:4] == ["C:\\wt.exe", "-w", "new", "new-tab"]
+
+
+def test_windows_terminal_falls_back_to_powershell_console(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr("aistart.launchers.platform.system", lambda: "Windows")
+    monkeypatch.setattr("aistart.launchers.shutil.which", lambda name: None)
+    monkeypatch.setattr("aistart.launchers.subprocess.run", fake_run)
+
+    results = launch_agents(
+        [runtime("claude")],
+        "terminal-window",
+        tmp_path,
+        load_config(tmp_path / "missing.json"),
+    )
+
+    assert results[0].ok is True
+    assert calls[0][:5] == ["cmd", "/c", "start", "", "powershell"]
+    script = calls[0][-1]
+    assert script == f"Set-Location -LiteralPath '{tmp_path}'; & 'claude'"
+
+
+def test_terminal_unsupported_platform_reports_error(monkeypatch, tmp_path):
+    monkeypatch.setattr("aistart.launchers.platform.system", lambda: "Linux")
+
+    results = launch_agents(
+        [runtime("claude")],
+        "terminal-tab",
+        tmp_path,
+        load_config(tmp_path / "missing.json"),
+    )
+
+    assert results[0].ok is False
+    assert "macOS and Windows" in results[0].message
+
+
 def test_screen_starts_session_then_opens_terminal_attach(monkeypatch, tmp_path):
     calls = []
 
